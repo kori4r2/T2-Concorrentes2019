@@ -1,58 +1,66 @@
 CFLAGS = -g -Wall -O3 -fopenmp
 LINKFLAGS = -fopenmp -lm
 PROJECT = Trabalho2
-REMOTEADDRESS = *ATUALIZEM ISSO AQUI*
-REMOTEHOME = *ATUALIZEM ISSO AQUI*
-REMOTEPORT = *ATUALIZEM ISSO AQUI*
+GROUPNAME = grupo-10a
+REMOTEADDRESS = andromeda.lasdpc.icmc.usp.br
+REMOTEPORT = 2270
 CC = mpicc
-DEBUGDIR = tests
+CCSEQ = gcc
 BINDIR = bin
-SRCDIR = src
-LIBDIR = lib
+SRCDIR = .
+LIBDIR = .
 REMOTEDIR = remotefiles
-SERVERFILES := $(wildcard $(REMOTEDIR)/*)
-LIBS := $(wildcard $(LIBDIR)/*h)
-SRCS := $(wildcard $(SRCDIR)/*c)
+REMOTEFILES := $(wildcard $(REMOTEDIR)/*)
+LIBS := $(wildcard $(LIBDIR)/*.h)
+SRCS := $(wildcard $(SRCDIR)/*par.c)
 OBJS := $(patsubst $(SRCDIR)/%.c, $(BINDIR)/%.o, $(SRCS))
+SEQSRCS := $(wildcard $(SRCDIR)/*seq.c)
+SEQOBJS := $(patsubst $(SRCDIR)/%.c, $(BINDIR)/%.o, $(SEQSRCS))
 
 all : build
+
+run : build 
+	./$(PROJECT) 10 10 10 10
+
+runseq : buildseq
+	./$(PROJECT)_seq 10 10 10 10
+
+mpi_run: build 
+	mpirun -np 2 $(PROJECT) 10 10 10 10
+
+runcompare: build buildseq
+	mpirun -np 2 $(PROJECT) 10 10 10 10 > par.out
+	./$(PROJECT)_seq 10 10 10 10 >seq.out
+	diff seq.out par.out
+
+$(BINDIR)/%par.o : $(SRCDIR)/%par.c $(LIBS)
+	$(CC) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
 
 build : $(BINDIR) $(OBJS)
 	$(CC) $(LINKFLAGS) $(OBJS) -o $(PROJECT)
 
-$(DEBUGDIR) :
-	mkdir -p $(DEBUGDIR)
+$(BINDIR)/%seq.o : $(SRCDIR)/%seq.c $(LIBS)
+	$(CCSEQ) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
+
+buildseq : $(BINDIR) $(SEQOBJS)
+	$(CCSEQ) $(LINKFLAGS) $(SEQOBJS) -o $(PROJECT)_seq
+
+remote :
+	ssh $(GROUPNAME)@$(REMOTEADDRESS) -p $(REMOTEPORT)
+
+sendfiles :
+	scp -P $(REMOTEPORT) $(SRCS) $(LIBS) $(REMOTEFILES) $(GROUPNAME)@$(REMOTEADDRESS):/home/$(GROUPNAME)
 
 $(BINDIR) :
 	mkdir -p $(BINDIR)
 
-$(BINDIR)/%.o : $(SRCDIR)/%.c $(LIBS)
-	$(CC) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
-
-remote :
-	ssh $(REMOTEADDRESS) -p $(REMOTEPORT)
-
-sendfiles :
-	scp -P $(REMOTEPORT) $(SRCS) $(LIBS) $(SERVERFILES) $(REMOTEADDRESS):$(REMOTEHOME)
-
 clean :
 	rm -rf $(BINDIR)
-	rm -rf $(DEBUGDIR)
 	rm -f $(PROJECT).zip
 	rm -f $(PROJECT)
-	#rm -f debug*.txt
-	#rm -f resultado.txt
+	rm -f $(PROJECT)_seq
 	clear
 
-run : build
-	./$(PROJECT)
-
-mpi_run: build
-	mpirun -np 2 $(PROJECT)
-
 .zip : clean
-	zip $(PROJECT).zip $(SRCS) $(LIBS) Makefile *.pdf
+	zip $(PROJECT).zip $(SRCS) $(LIBS) $(SEQSRCS) $(REMOTEFILES) *.pdf
 
-#debug: $(DEBUGDIR) all
-#	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes mpirun -np 2 $(PROJECT) > $(DEBUGDIR)/output.txt 2> $(DEBUGDIR)/error.txt
-#	diff resultadoCorreto.txt $(DEBUGDIR)/output.txt > $(DEBUGDIR)/diff.txt
