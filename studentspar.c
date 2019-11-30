@@ -3,14 +3,316 @@
 #include <string.h>
 #include <mpi.h>
 #include <math.h>
+#include <limits.h>
 #include <omp.h>
 
 #define SLAVE_PROGRAM "slave_cidade"
 #define NUM_THREADS 4
 
+void calcula_menor(int *notas, int *menorc, int *menorr, int *menorb, int startReg, int nRegioes, int C, int A)
+{
+    int mb = INT_MAX;
+	int endReg = startReg + nRegioes;
+    #pragma omp parallel for reduction(min: mb) schedule(guided)
+    for (int r = startReg; r < endReg; ++r)
+    {
+        menorr[r - startReg] = INT_MAX;
+        int menorr_r = INT_MAX;
+        #pragma omp parallel for reduction(min: menorr_r) schedule(guided)
+        for (int c = 0; c < C; ++c)
+        {
+            menorc[(r - startReg) * C + c] = INT_MAX;
+            int menorc_rCx = INT_MAX;
+            #pragma omp parallel for reduction(min: menorc_rCx) schedule(guided)
+            for (int a = 0; a < A; ++a)
+            {
+                if(notas[r * C * A + c * A + a] < menorc_rCx)
+                    menorc_rCx = notas[r * C * A + c * A + a];
+            }
+            menorc[(r - startReg) * C + c] = menorc_rCx;
+            if(menorc[(r - startReg) * C + c] < menorr_r)
+                menorr_r = menorc[(r - startReg) * C + c];
+        }
+        menorr[r - startReg] = menorr_r;
+        if(menorr[r - startReg] < mb)
+            mb = menorr[r - startReg];
+    }
+    *menorb = mb;
+}
+
+void calcula_maior(int *notas, int *maiorc, int *maiorr, int *maiorb, int startReg, int nRegioes, int C, int A)
+{
+    //valores default
+    memset(maiorr, 0, nRegioes * sizeof(int));
+    memset(maiorc, 0, nRegioes * C * sizeof(int));
+    
+    int mb = 0;
+	int endReg = startReg + nRegioes;
+    #pragma omp parallel for reduction(max: mb) schedule(guided)
+    for (int r = startReg; r < endReg; ++r)
+    {
+        int maiorr_r = maiorr[r - startReg];
+        #pragma omp parallel for reduction(max: maiorr_r) schedule(guided)
+        for (int c = 0; c < C; ++c)
+        {
+            int maiorc_rCc = maiorc[(r - startReg) * C + c];
+            #pragma omp parallel for reduction(max: maiorc_rCc) schedule(guided)
+            for (int a = 0; a < A; ++a)
+            {
+                if(notas[r * C * A + c * A + a] > maiorc_rCc)
+                    maiorc_rCc = notas[r * C * A + c * A + a];
+            }
+            maiorc[(r - startReg) * C + c] = maiorc_rCc;
+            if(maiorc[(r - startReg) * C + c] > maiorr_r)
+                maiorr_r = maiorc[(r - startReg) * C + c];
+        }
+        maiorr[r - startReg] = maiorr_r;
+        if(maiorr[r - startReg] > mb)
+            mb = maiorr[r - startReg];
+    }
+    
+    *maiorb = mb;
+}
+
 int cmpfunc (const void * a, const void * b)
 {
    return ( *(int*)a - *(int*)b );
+}
+
+int mergeSortedBlocks(int *block, int**sortedBlocks, int firstSortedBlock, int blockSize, int size, int blockStart){
+    if(size == blockSize){
+        memcpy(block, sortedBlocks[firstSortedBlock + blockStart/blockSize], blockSize * sizeof(int));
+        return 1;
+    }
+    
+    int nBlocks = size / blockSize;
+    int sizeBlockA = (nBlocks/2) * blockSize;
+    int sizeBlockB = (nBlocks/2 + ((nBlocks % 2 == 0)? 0 : 1)) * blockSize;
+    
+    // Ordena a primeira metade do bloco
+    int* blockA = (int*)malloc(sizeBlockA * sizeof(int));
+    if(sizeBlockA == blockSize){
+        memcpy(blockA, sortedBlocks[firstSortedBlock + blockStart/blockSize], blockSize * sizeof(int));
+    }else{
+        mergeSortedBlocks(blockA, sortedBlocks, firstSortedBlock, blockSize, sizeBlockA, blockStart);
+    }
+    
+    // Ordena a segunda metade do bloco
+    int* blockB = (int*)malloc(sizeBlockB * sizeof(int));
+    if(sizeBlockB == blockSize){
+        memcpy(blockB, sortedBlocks[firstSortedBlock + (blockStart + sizeBlockA)/blockSize], blockSize * sizeof(int));
+    }else{
+        mergeSortedBlocks(blockB, sortedBlocks, firstSortedBlock, blockSize, sizeBlockB, blockStart + sizeBlockA);
+    }
+    
+    // Faz um merge dos dois blocos no bloco no atual
+    int i, j, k, min;
+    for(i = 0, j = 0, k = 0; (i < sizeBlockA || j < sizeBlockB) && k < size;k++){
+        // Calcula qual o valor a ser colocado na proxima posição do bloco atual
+        if(i >= sizeBlockA){
+            min = blockB[j++];
+        }else if(j >= sizeBlockB){
+            min = blockA[i++];
+        }else{
+            if(blockB[j] <= blockA[i]){
+                min = blockB[j++];
+            }else{
+                min = blockA[i++];
+            }
+        }
+        
+        block[k] = min;
+    }
+    
+    return 0;
+}
+
+void calcula_mediana(int *notas, double *medianac, double *medianar, int startReg, int nRegioes, int C, int A)
+{
+    // Copia as notas de cada cidade separadamente e ordena usando quicksort
+    int **notasOrdenadasCidades = (int**)malloc(nRegioes * C * sizeof(int*));
+    #pragma omp parallel for schedule(guided)
+    for(int i = 0; i < nRegioes * C; i++){
+        notasOrdenadasCidades[i] = (int*)malloc(A * sizeof(int));
+        memcpy(notasOrdenadasCidades[i], &notas[startReg * C * A + i * A], A * sizeof(int));
+        qsort(notasOrdenadasCidades[i], A, sizeof(int), cmpfunc);
+        if (A % 2)
+        {
+            medianac[i] = notasOrdenadasCidades[i][A / 2];
+        }
+        else
+        {
+            medianac[i] = (notasOrdenadasCidades[i][A / 2] + notasOrdenadasCidades[i][A / 2 - 1]) / 2.0;
+        }
+    }
+    
+    // Pega as notas de cidades ordenadas, e faz merge em blocos para cada região
+    int **notasOrdenadasRegioes = (int**)malloc(nRegioes * sizeof(int*));
+    #pragma omp parallel for schedule(guided)
+    for(int i = 0; i < nRegioes; i++){
+        notasOrdenadasRegioes[i] = (int*)malloc(C * A * sizeof(int));
+        mergeSortedBlocks(notasOrdenadasRegioes[i], notasOrdenadasCidades, i * nRegioes, A, C * A, 0);
+        if ((C * A) % 2)
+        {
+            medianar[i] = notasOrdenadasRegioes[i][(C * A) / 2];
+        }
+        else
+        {
+            medianar[i] = (notasOrdenadasRegioes[i][(C * A) / 2] + notasOrdenadasRegioes[i][(C * A) / 2 - 1]) / 2.0;
+        }
+    }
+    
+    // Não precisa mais da matriz de notas ordenadas das cidades
+    #pragma omp parallel for schedule(guided)
+    for(int i = 0; i < nRegioes * C; i++){
+        free(notasOrdenadasCidades[i]);
+    }
+    free(notasOrdenadasCidades);
+
+    // Não precisa mais da matriz de notas ordenadas das regioes
+    #pragma omp parallel for schedule(guided)
+    for(int i = 0; i < nRegioes; i++){
+        free(notasOrdenadasRegioes[i]);
+    }
+    free(notasOrdenadasRegioes);
+    
+}
+
+void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, int *mr, int *mcr, int *mcc, int startReg, int nRegioes, int C, int A)
+{
+    //valores default
+    #pragma omp parallel for schedule(guided)
+    for (int r = 0; r < nRegioes; ++r)
+    {
+        mediar[r] = 0;
+        #pragma omp parallel for schedule(guided)
+        for (int c = 0; c < C; ++c)
+        {
+            mediac[r * C + c] = 0;
+        }
+    }
+    *mediab = 0;
+	double mb = 0;
+    *mr = 0;
+    *mcr = 0;
+    *mcc = 0;
+
+	int endReg = startReg + nRegioes;
+    #pragma omp parallel for schedule(guided) reduction(+: mb)
+    for (int r = startReg; r < endReg; ++r)
+    {
+        double mediar_r = mediar[r - startReg];
+        #pragma omp parallel for schedule(guided) reduction(+: mediar_r)
+        for (int c = 0; c < C; ++c)
+        {
+            double mediac_rCc = mediac[(r - startReg) * C + c];
+            #pragma omp parallel for schedule(guided) reduction(+: mediac_rCc)
+            for (int a = 0; a < A; ++a)
+            {
+                mediac_rCc += notas[r * C * A + c * A + a];
+            }
+            mediac[(r - startReg) * C + c] = mediac_rCc/A;
+            mediar_r += mediac[(r - startReg) * C + c];
+
+			#pragma omp critical
+			{
+				if (mediac[(r - startReg) * C + c] > mediac[(*mcr) * C + (*mcc)])
+				{
+					*mcr = r;
+					*mcc = c;
+				}
+			}
+        }
+        mediar[r - startReg] = mediar_r/C;
+        mb += mediar[r - startReg];
+
+		#pragma omp critical
+		{
+			if (mediar[r - startReg] > mediar[(*mr)])
+			{
+				*mr = r;
+			}
+		}
+    }
+	mb /= nRegioes;
+    *mediab = mb;
+}
+
+void media_dp_aux(int *notas, double *mediac, double *mediar, double *mediab, int startReg, int nRegioes, int C, int A)
+{
+    //valores default
+    #pragma omp parallel for schedule(guided)
+    for (int r = 0; r < nRegioes; ++r)
+    {
+        mediar[r] = 0;
+        #pragma omp parallel for schedule(guided)
+        for (int c = 0; c < C; ++c)
+        {
+            mediac[r * C + c] = 0;
+        }
+    }
+    *mediab = 0;
+	double mb = 0;
+
+	int endReg = startReg + nRegioes;
+    #pragma omp parallel for schedule(guided) reduction(+: mb)
+    for (int r = startReg; r < endReg; ++r)
+    {
+        double mediar_r = mediar[r - startReg];
+        #pragma omp parallel for schedule(guided) reduction(+: mediar_r)
+        for (int c = 0; c < C; ++c)
+        {
+            double mediac_rCc = mediac[(r - startReg) * C + c];
+            #pragma omp parallel for schedule(guided) reduction(+: mediac_rCc)
+            for (int a = 0; a < A; ++a)
+            {
+                mediac_rCc += notas[r * C * A + c * A + a];
+            }
+            mediac[(r - startReg) * C + c] = mediac_rCc/A;
+            mediar_r += mediac[(r - startReg) * C + c];
+        }
+        mediar[r - startReg] = mediar_r/C;
+        mb += mediar[r -startReg];
+    }
+	mb /= nRegioes;
+    *mediab = mb;
+}
+
+void calcula_dp(int *notas, double *dpc, double *dpr, double *dpb, int startReg, int nRegioes, int C, int A)
+{
+    double *mediac, *mediar, mediab;
+    mediac = (double *) malloc(nRegioes * C * sizeof(double));
+    mediar = (double *) malloc(nRegioes * sizeof(double));
+    
+    //calcula a media
+    media_dp_aux(notas, mediac, mediar, &mediab, startReg, nRegioes, C, A);
+    
+    //valores default
+    double x = 0, y = 0, z = 0;
+	int endReg = startReg + nRegioes;
+    #pragma omp parallel for schedule(guided) reduction(+: z) private(y)
+    for (int r = startReg; r < endReg; ++r)
+    {
+		y = 0;
+        #pragma omp parallel for schedule(guided) reduction(+: y, z) private(x)
+        for (int c = 0; c < C; ++c)
+        {
+			x = 0;
+            #pragma omp parallel for reduction(+: x, y, z) schedule(guided)
+            for (int a = 0; a < A; ++a)
+            {
+                x += pow(notas[r * C * A + c * A + a] - mediac[(r - startReg) * C + c], 2);
+                y += pow(notas[r * C * A + c * A + a] - mediar[r - startReg], 2);
+                z += pow(notas[r * C * A + c * A + a] - mediab, 2);
+            }
+            dpc[(r - startReg) * C + c] = sqrt(x / A);
+        }
+        dpr[r - startReg] = sqrt(y / (C * A));
+    }
+    *dpb = sqrt(z / (nRegioes * C * A));
+    
+    free(mediac);
+    free(mediar);
 }
 
 int main (int argc, char *argv[]){
@@ -188,26 +490,31 @@ int main (int argc, char *argv[]){
 		{
 			// calcula_menor
 			printf("calculando menor no processo %d\n", w_rank);
+			calcula_menor(notas, menorc_aqui, menorr_aqui, &menorb, startIndex, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_maior
 			printf("calculando maior no processo %d\n", w_rank);
+			calcula_maior(notas, maiorc_aqui, maiorr_aqui, &maiorb, startIndex, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_mediana (OBS.: alterado)
 			printf("calculando mediana no processo %d\n", w_rank);
+            calcula_mediana(notas, medianac_aqui, medianar_aqui, startIndex, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_media
 			printf("calculando media no processo %d\n", w_rank);
+            calcula_media(notas, mediac_aqui, mediar_aqui, &mediab, &mr, &mcr, &mcc, startIndex, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_dp
 			printf("calculando desvio padrao no processo %d\n", w_rank);
+			calcula_dp(notas, dpc_aqui, dpr_aqui, &dpb, startIndex, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
