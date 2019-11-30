@@ -29,27 +29,27 @@ mpi_run: build
 	mpirun -np 4 $(PROJECT) 10 11 12 10 2> debug.out
 
 runcompare: build buildseq
-	mpirun -np 4 $(PROJECT) 10 11 12 15 > par.out
-	./$(PROJECT)_seq 10 11 12 15 >seq.out
+	mpirun -np 4 $(PROJECT) 100 300 1000 10 > par.out
+	./$(PROJECT)_seq 100 300 1000 10 >seq.out
 	diff seq.out par.out
 
 $(BINDIR)/%par.o : $(SRCDIR)/%par.c $(LIBS)
 	$(CC) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
 
 build : $(BINDIR) $(OBJS)
-	$(CC) $(LINKFLAGS) $(OBJS) -o $(PROJECT)
+	$(CC) -o $(PROJECT) $(OBJS) $(LINKFLAGS)
 
 $(BINDIR)/%seq.o : $(SRCDIR)/%seq.c $(LIBS)
 	$(CCSEQ) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
 
 buildseq : $(BINDIR) $(SEQOBJS)
-	$(CCSEQ) $(LINKFLAGS) $(SEQOBJS) -o $(PROJECT)_seq
+	$(CCSEQ) -o $(PROJECT)_seq $(SEQOBJS) $(LINKFLAGS)
 
 remote :
 	ssh $(GROUPNAME)@$(REMOTEADDRESS) -p $(REMOTEPORT)
 
 sendfiles :
-	scp -P $(REMOTEPORT) $(SRCS) $(LIBS) $(REMOTEFILES) $(GROUPNAME)@$(REMOTEADDRESS):/home/$(GROUPNAME)
+	scp -P $(REMOTEPORT) $(SRCS) $(SEQSRCS) $(LIBS) $(REMOTEFILES) $(GROUPNAME)@$(REMOTEADDRESS):/home/$(GROUPNAME)
 
 $(BINDIR) :
 	mkdir -p $(BINDIR)

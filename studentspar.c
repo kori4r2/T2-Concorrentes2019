@@ -177,7 +177,7 @@ void calcula_mediana(int *notas, double *medianac, double *medianar, int startRe
     
 }
 
-void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, int *mr, int *mc, int startReg, int nRegioes, int C, int A)
+void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, double *mr, double *mc, int startReg, int nRegioes, int C, int A)
 {
     //valores default
     #pragma omp parallel for schedule(guided)
@@ -319,8 +319,8 @@ int main (int argc, char *argv[]){
     int *notas;
     int *menorc, *maiorc, *menorr, *maiorr, menorb, maiorb;
     double *medianac, *mediac, *dpc, *medianar, *mediar, *dpr, medianab, mediab, dpb;
-    int mr[2] = {-1, -1}; // pos 0 = numero da melhor regiao; pos 1 = valor da media na melhor regiao
-    int mc[3] = {-1, -1, -1}; // pos 0 = numero da regiao da melhor cidade; pos 1 = numero da melhor cidade; pos 2 = valor da media na melhor cidade
+    double mr[2] = {-1, -1}; // pos 0 = numero da melhor regiao; pos 1 = valor da media na melhor regiao
+    double mc[3] = {-1, -1, -1}; // pos 0 = numero da regiao da melhor cidade; pos 1 = numero da melhor cidade; pos 2 = valor da media na melhor cidade
 	MPI_Comm commWorld = MPI_COMM_WORLD;
 
 //--------------- Código executado no inicio de cada processo, avalia os argumentos de entrada e inicializa a matriz (Replicação de 
@@ -387,8 +387,8 @@ int main (int argc, char *argv[]){
 	int *offsetCidades = NULL;
 	int *distribuicaoRegioes = NULL;
 	int *offsetRegioes = NULL;
-	int *melhorRegiao = NULL;
-	int *melhorCidade = NULL;
+	double *melhorRegiao = NULL;
+	double *melhorCidade = NULL;
 	double *mediabProcessos = NULL;
 	double *dpbProcessos = NULL;
 	// Alocação de memoria, o processo 0 precisa ser capaz de armazenar todas as informações para realizar um gatherv
@@ -441,8 +441,8 @@ int main (int argc, char *argv[]){
 		// Ele tambem precisa de arrays auxiliares para armazenar as medias e dp brasileiras calculadas em cada processo, assim como index de melhor regiao e cidade
 		mediabProcessos = (double*)malloc(sizeof(double) * w_size);
 		dpbProcessos = (double*)malloc(sizeof(double) * w_size);
-		melhorCidade = (int*)malloc(sizeof(int) * 3 * w_size);
-		melhorRegiao = (int*)malloc(sizeof(int) * 2 * w_size);
+		melhorCidade = (double*)malloc(sizeof(double) * 3 * w_size);
+		melhorRegiao = (double*)malloc(sizeof(double) * 2 * w_size);
 	}else{
 		menorc = NULL;
 		maiorc = NULL;
@@ -555,8 +555,8 @@ int main (int argc, char *argv[]){
 	MPI_Gather(&dpb, 1, MPI_DOUBLE, dpbProcessos, 1, MPI_DOUBLE, 0, commWorld);
 
 	// Recebe os resultados de melhor regiao e cidade de cada processo
-	MPI_Gather(mr, 2, MPI_INT, melhorRegiao, 2, MPI_INT, 0, commWorld);
-	MPI_Gather(mc, 3, MPI_INT, melhorCidade, 3, MPI_INT, 0, commWorld);
+	MPI_Gather(mr, 2, MPI_DOUBLE, melhorRegiao, 2, MPI_DOUBLE, 0, commWorld);
+	MPI_Gather(mc, 3, MPI_DOUBLE, melhorCidade, 3, MPI_DOUBLE, 0, commWorld);
 	
 //--------------- Liberação de memoria de todos os processos
 	// Libera a memória alocada
@@ -633,8 +633,8 @@ int main (int argc, char *argv[]){
 		printf("Brasil: menor: %d, maior: %d, mediana: %.2f, média: %.2f e DP: %.2f\n\n", menorb, maiorb, medianab, mediab, dpb);
 
 		//printando melhores
-		printf("Melhor região: Região %d\n", mr[0]);
-		printf("Melhor cidade: Região %d, Cidade %d\n", mc[0], mc[1]);
+		printf("Melhor região: Região %d\n", (int)mr[0]);
+		printf("Melhor cidade: Região %d, Cidade %d\n", (int)mc[0], (int)mc[1]);
 		printf("\n");
 
 		printf("Tempo de resposta sem considerar E/S, em segundos: %.3lfs\n", wtime);

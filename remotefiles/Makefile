@@ -18,8 +18,8 @@ run: build
 	mpirun --hostfile hosts -np 10 $(PROJECT) 10 11 12 10
 
 runcompare: build buildseq
-	mpirun --hostfile hosts -np 10 $(PROJECT) 10 11 12 10 > par.out
-	./$(PROJECT)_seq 10 11 12 10 >seq.out
+	mpirun --hostfile hosts -np 10 $(PROJECT) 100 300 1000 10 > par.out
+	./$(PROJECT)_seq 100 300 1000 10 >seq.out
 	diff seq.out par.out
 
 runseq : buildseq
@@ -29,13 +29,13 @@ $(BINDIR)/%par.o : $(SRCDIR)/%par.c $(LIBS)
 	$(CC) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
 
 build : $(BINDIR) $(OBJS)
-	$(CC) $(LINKFLAGS) $(OBJS) -o $(PROJECT)
+	$(CC) -o $(PROJECT) $(OBJS) $(LINKFLAGS)
 
 $(BINDIR)/%seq.o : $(SRCDIR)/%seq.c $(LIBS)
 	$(CCSEQ) -c $< -I $(LIBDIR) $(CFLAGS) -o $@
 
 buildseq : $(BINDIR) $(SEQOBJS)
-	$(CCSEQ) $(LINKFLAGS) $(SEQOBJS) -o $(PROJECT)_seq
+	$(CCSEQ) -o $(PROJECT)_seq $(SEQOBJS) $(LINKFLAGS)
 
 $(BINDIR) :
 	mkdir -p $(BINDIR)

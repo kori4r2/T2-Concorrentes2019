@@ -76,7 +76,6 @@ int cmpfunc (const void * a, const void * b)
 void calcula_mediana(int *notas, double *medianac, double *medianar, double *medianab, int R, int C, int A)
 {
     //mediana nas cidades
-    int aux;
     for (int r = 0; r < R; ++r)
     {
         for (int c = 0; c < C; ++c)
