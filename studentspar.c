@@ -14,7 +14,7 @@ int cmpfunc (const void * a, const void * b)
 }
 
 int main (int argc, char *argv[]){
-    int R, C, A, seed, NTA, w_rank, w_size;
+    int R, C, A, seed, NTA, w_rank, w_size, recvBuffer;
     double wtime;
     int *notas;
     int *menorc, *maiorc, *menorr, *maiorr, menorb, maiorb;
@@ -23,7 +23,7 @@ int main (int argc, char *argv[]){
     int mcr, mcc; //num da regiao da melhor cidade e da melhor cidade respectivamente
 	MPI_Comm commWorld = MPI_COMM_WORLD;
 
-//--------------- Código executado no inicio de cada processo, avalia os argumentos de entrada e inicializa a matriz
+//--------------- Código executado no inicio de cada processo, avalia os argumentos de entrada e inicializa a matriz (Replicação de 
     //entrada parametros
 	if(argc != 5){
 		printf("Erro de entrada, o comando de execução deve ser mpirun -np \'nº de processos\' Trabalho2 \'nº de regiões\' \'nº de Cidades por região \'nº de alunos por cidade\' \'seed para aleatorizar\'");
@@ -39,8 +39,9 @@ int main (int argc, char *argv[]){
     NTA = R * C * A;
     notas = (int *)malloc(NTA * sizeof(int));
     //geracao das notas
-    for (int i = 0; i < NTA; ++i)
+    for (int i = 0; i < NTA; ++i){
         notas[i] = rand() % 101;
+	}
 
 	omp_set_num_threads(NUM_THREADS);
 	omp_set_nested(1);
@@ -54,7 +55,6 @@ int main (int argc, char *argv[]){
 
 	// Se o processo for desnecessário, ele é encerrado
 	if(w_size > R){
-		MPI_Group activeProcesses;
 		int color = 0;
 		if(w_rank >= R){
 			color = 1;
@@ -84,6 +84,12 @@ int main (int argc, char *argv[]){
 		startIndex += ((R % w_size) - (w_size - w_rank));
 
 //--------------- Alocação de memoria necessaria
+	int *distribuicaoCidades = NULL;
+	int *offsetCidades = NULL;
+	int *distribuicaoRegioes = NULL;
+	int *offsetRegioes = NULL;
+	double *mediabProcessos = NULL;
+	double *dpbProcessos = NULL;
 	// Alocação de memoria, o processo 0 precisa ser capaz de armazenar todas as informações para realizar um gatherv
 	if(w_rank == 0){
 		// menorc armazena os menores valores de cada cidade
@@ -109,7 +115,49 @@ int main (int argc, char *argv[]){
 		dpr = (double *)malloc(R * sizeof(double));
 
 		// O processo 0 precisa de arrays de contagem de elementos para realizar os gatherv
+		distribuicaoCidades = (int*)malloc(sizeof(int) * w_size);
+		offsetCidades = (int*)malloc(sizeof(int) * w_size);
+		distribuicaoRegioes = (int*)malloc(sizeof(int) * w_size);
+		offsetRegioes = (int*)malloc(sizeof(int) * w_size);
+
+		for(int i = 0; i < w_size; i++){
+			// Calcula a quantos elementos o processo i tem
+			distribuicaoRegioes[i] = R / w_size;
+			if((w_size - i) <= (R % w_size))
+				distribuicaoRegioes[i]++;
+			distribuicaoCidades[i] = distribuicaoRegioes[i] * C;
+
+			// Calcula o offset do processo i nos vetores de resultados para cidades e regioes
+			if(i > 0){
+				offsetCidades[i] = offsetCidades[i-1] + distribuicaoCidades[i-1];
+				offsetRegioes[i] = offsetRegioes[i-1] + distribuicaoRegioes[i-1];
+			}else{
+				offsetCidades[i] = 0;
+				offsetRegioes[i] = 0;
+			}
+		}
+
+		// Ele tambem precisa de arrays auxiliares para armazenar as medias e dp brasileiras calculadas em cada processo
+		mediabProcessos = (double*)malloc(sizeof(double) * w_size);
+		dpbProcessos = (double*)malloc(sizeof(double) * w_size);
+	}else{
+		menorc = NULL;
+		maiorc = NULL;
+		medianac = NULL;
+		mediac = NULL;
+		dpc = NULL;
+		menorr = NULL;
+		maiorr = NULL;
+		medianar = NULL;
+		mediar = NULL;
+		dpr = NULL;
 	}
+
+	// Cada Recebe o numero de cidades e regioes em cada processo para definir os pesos dos receives
+	// Pode ser mais eficiente replicar o calculo
+//	MPI_Gather(&nCidades, 1, MPI_INT, distribuicaoCidades, 1, MPI_INT, 0, commWorld);
+//	MPI_Gather(&nRegioes, 1, MPI_INT, distribuicaoRegioes, 1, MPI_INT, 0, commWorld);
+
 	// Todos os processos precisam receber ter memoria suficiente para armazenar os dados das suas regiões -----------
 	// menorc_aqui armazena os menores valores de cada cidade dentro das suas regioes
 	int *menorc_aqui = (int *)malloc(nCidades * sizeof(int));
@@ -139,28 +187,33 @@ int main (int argc, char *argv[]){
 		#pragma omp section
 		{
 			// calcula_menor
+			printf("calculando menor no processo %d\n", w_rank);
 		}
 		#pragma omp section
 		{
 			// calcula_maior
+			printf("calculando maior no processo %d\n", w_rank);
 		}
 		#pragma omp section
 		{
 			// calcula_mediana (OBS.: alterado)
+			printf("calculando mediana no processo %d\n", w_rank);
 		}
 		#pragma omp section
 		{
 			// calcula_media
+			printf("calculando media no processo %d\n", w_rank);
 		}
 		#pragma omp section
 		{
 			// calcula_dp
+			printf("calculando desvio padrao no processo %d\n", w_rank);
 		}
 		#pragma omp section
 		{
 //--------------- Ordenação de todas as notas para calculo de mediana do brasil (processo 0)
 			if(w_rank == 0){
-				int *notas2 (int*)malloc(sizeof(int) * NTA);
+				int *notas2 = (int*)malloc(sizeof(int) * NTA);
 				memcpy(notas2, notas, sizeof(int) * NTA);
 				qsort(notas2, NTA, sizeof(int), cmpfunc);
 				if(NTA % 2){
@@ -171,8 +224,32 @@ int main (int argc, char *argv[]){
 			}
 		}
 	}
-//--------------- Gather no processo 0 para calculo dos valores do brasil
+//--------------- Gatherv no processo 0 para calculo dos valores do brasil
 
+	// Recebe os resultados dos calculos para cada cidade
+	MPI_Gatherv(menorc_aqui, nCidades, MPI_INT, menorc, distribuicaoCidades, offsetCidades, MPI_INT, 0, commWorld);
+	MPI_Gatherv(maiorc_aqui, nCidades, MPI_INT, maiorc, distribuicaoCidades, offsetCidades, MPI_INT, 0, commWorld);
+	MPI_Gatherv(medianac_aqui, nCidades, MPI_DOUBLE, medianac, distribuicaoCidades, offsetCidades, MPI_DOUBLE, 0, commWorld);
+	MPI_Gatherv(mediac_aqui, nCidades, MPI_DOUBLE, mediac, distribuicaoCidades, offsetCidades, MPI_DOUBLE, 0, commWorld);
+	MPI_Gatherv(dpc_aqui, nCidades, MPI_DOUBLE, dpc, distribuicaoCidades, offsetCidades, MPI_DOUBLE, 0, commWorld);
+
+	// Recebe os resultados dos calculos para cada regiao
+	MPI_Gatherv(menorr_aqui, nRegioes, MPI_INT, menorr, distribuicaoRegioes, offsetRegioes, MPI_INT, 0, commWorld);
+	MPI_Gatherv(maiorr_aqui, nRegioes, MPI_INT, maiorr, distribuicaoRegioes, offsetRegioes, MPI_INT, 0, commWorld);
+	MPI_Gatherv(medianar_aqui, nRegioes, MPI_DOUBLE, medianar, distribuicaoRegioes, offsetRegioes, MPI_DOUBLE, 0, commWorld);
+	MPI_Gatherv(mediar_aqui, nRegioes, MPI_DOUBLE, mediar, distribuicaoRegioes, offsetRegioes, MPI_DOUBLE, 0, commWorld);
+	MPI_Gatherv(dpr_aqui, nRegioes, MPI_DOUBLE, dpr, distribuicaoRegioes, offsetRegioes, MPI_DOUBLE, 0, commWorld);
+
+	// Usa um reduce para calcular o menor e o maior valor do brasil
+	MPI_Reduce(&menorb, &recvBuffer, 1, MPI_INT, MPI_MIN, 0, commWorld);
+	menorb = recvBuffer;
+	MPI_Reduce(&maiorb, &recvBuffer, 1, MPI_INT, MPI_MAX, 0, commWorld);
+	maiorb = recvBuffer;
+
+	// Recebe as medias e desvios padrao calculados por cada processo
+	MPI_Gather(&mediab, 1, MPI_DOUBLE, mediabProcessos, 1, MPI_DOUBLE, 0, commWorld);
+	MPI_Gather(&dpb, 1, MPI_DOUBLE, dpbProcessos, 1, MPI_DOUBLE, 0, commWorld);
+	
 //--------------- Liberação de memoria de todos os processos
 	// Libera a memória alocada
 	free(menorc_aqui);
@@ -189,6 +266,22 @@ int main (int argc, char *argv[]){
 
 //--------------- O processo zero faz a impressão dos resultados
 	if(w_rank == 0){
+
+		// Calcula a media e o desvio padrao global entre os processos
+		mediab = 0;
+		for(int i = 0; i < w_size; i++){
+			mediab += distribuicaoRegioes[i] * mediabProcessos[i];
+		}
+		mediab /= R;
+
+		dpb = 0;
+		for(int i = 0; i < w_size; i++){
+			double desvioGlobal = mediabProcessos[i] - mediab;
+			dpb += distribuicaoRegioes[i] * ((dpbProcessos[i] * dpbProcessos[i]) + (desvioGlobal * desvioGlobal));
+		}
+		dpb /= R;
+
+		// Calcula quanto tempo demorou
 		wtime = omp_get_wtime() - wtime;
 
 		//printando o resultado das cidades
@@ -229,7 +322,11 @@ int main (int argc, char *argv[]){
 		free(medianar);
 		free(mediar);
 		free(dpr);
+		free(mediabProcessos);
+		free(dpbProcessos);
 		// Libera a memoria das arrays de contagem de elementos
+		free(distribuicaoCidades);
+		free(distribuicaoRegioes);
 	}
 
 

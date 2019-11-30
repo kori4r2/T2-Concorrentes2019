@@ -26,7 +26,7 @@ runseq : buildseq
 	./$(PROJECT)_seq 10 10 10 10
 
 mpi_run: build 
-	mpirun -np 2 $(PROJECT) 10 10 10 10
+	mpirun -np 2 $(PROJECT) 10 10 10 10 2> debug.out
 
 runcompare: build buildseq
 	mpirun -np 2 $(PROJECT) 10 10 10 10 > par.out
@@ -59,6 +59,7 @@ clean :
 	rm -f $(PROJECT).zip
 	rm -f $(PROJECT)
 	rm -f $(PROJECT)_seq
+	rm -f *.out
 	clear
 
 .zip : clean
