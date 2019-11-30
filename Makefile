@@ -20,17 +20,17 @@ SEQOBJS := $(patsubst $(SRCDIR)/%.c, $(BINDIR)/%.o, $(SEQSRCS))
 all : build
 
 run : build 
-	./$(PROJECT) 10 10 10 10
+	./$(PROJECT) 10 11 12 10
 
 runseq : buildseq
-	./$(PROJECT)_seq 10 10 10 10
+	./$(PROJECT)_seq 10 11 12 10
 
 mpi_run: build 
-	mpirun -np 2 $(PROJECT) 10 10 10 10 2> debug.out
+	mpirun -np 4 $(PROJECT) 10 11 12 10 2> debug.out
 
 runcompare: build buildseq
-	mpirun -np 2 $(PROJECT) 10 10 10 10 > par.out
-	./$(PROJECT)_seq 10 10 10 10 >seq.out
+	mpirun -np 4 $(PROJECT) 10 11 12 15 > par.out
+	./$(PROJECT)_seq 10 11 12 15 >seq.out
 	diff seq.out par.out
 
 $(BINDIR)/%par.o : $(SRCDIR)/%par.c $(LIBS)

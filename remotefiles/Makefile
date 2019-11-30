@@ -15,11 +15,11 @@ SEQOBJS := $(patsubst $(SRCDIR)/%.c, $(BINDIR)/%.o, $(SEQSRCS))
 all : build 
 
 run: build 
-	mpirun --hostfile hosts -np 10 $(PROJECT) 10 10 10 10
+	mpirun --hostfile hosts -np 10 $(PROJECT) 10 11 12 10
 
 runcompare: build buildseq
-	mpirun --hostfile hosts -np 10 $(PROJECT) 10 10 10 10 > par.out
-	./$(PROJECT)_seq 10 10 10 10 >seq.out
+	mpirun --hostfile hosts -np 10 $(PROJECT) 10 11 12 10 > par.out
+	./$(PROJECT)_seq 10 11 12 10 >seq.out
 	diff seq.out par.out
 
 runseq : buildseq

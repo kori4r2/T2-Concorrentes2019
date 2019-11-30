@@ -6,7 +6,6 @@
 #include <limits.h>
 #include <omp.h>
 
-#define SLAVE_PROGRAM "slave_cidade"
 #define NUM_THREADS 4
 
 void calcula_menor(int *notas, int *menorc, int *menorr, int *menorb, int startReg, int nRegioes, int C, int A)
@@ -151,7 +150,7 @@ void calcula_mediana(int *notas, double *medianac, double *medianar, int startRe
     #pragma omp parallel for schedule(guided)
     for(int i = 0; i < nRegioes; i++){
         notasOrdenadasRegioes[i] = (int*)malloc(C * A * sizeof(int));
-        mergeSortedBlocks(notasOrdenadasRegioes[i], notasOrdenadasCidades, i * nRegioes, A, C * A, 0);
+        mergeSortedBlocks(notasOrdenadasRegioes[i], notasOrdenadasCidades, i * C, A, C * A, 0);
         if ((C * A) % 2)
         {
             medianar[i] = notasOrdenadasRegioes[i][(C * A) / 2];
@@ -178,7 +177,7 @@ void calcula_mediana(int *notas, double *medianac, double *medianar, int startRe
     
 }
 
-void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, int *mr, int *mcr, int *mcc, int startReg, int nRegioes, int C, int A)
+void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, int *mr, int *mc, int startReg, int nRegioes, int C, int A)
 {
     //valores default
     #pragma omp parallel for schedule(guided)
@@ -193,9 +192,6 @@ void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, i
     }
     *mediab = 0;
 	double mb = 0;
-    *mr = 0;
-    *mcr = 0;
-    *mcc = 0;
 
 	int endReg = startReg + nRegioes;
     #pragma omp parallel for schedule(guided) reduction(+: mb)
@@ -216,10 +212,11 @@ void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, i
 
 			#pragma omp critical
 			{
-				if (mediac[(r - startReg) * C + c] > mediac[(*mcr) * C + (*mcc)])
+				if (mediac[(r - startReg) * C + c] > mc[2] || ((mediac[(r - startReg) * C + c] == mc[2]) && (c < mc[1])))
 				{
-					*mcr = r;
-					*mcc = c;
+					mc[0] = r;
+					mc[1] = c;
+					mc[2] = mediac[(r - startReg) * C + c];
 				}
 			}
         }
@@ -228,9 +225,10 @@ void calcula_media(int *notas, double *mediac, double *mediar, double *mediab, i
 
 		#pragma omp critical
 		{
-			if (mediar[r - startReg] > mediar[(*mr)])
+			if (mediar[r - startReg] > mr[1] || (mediar[r - startReg] == mr[1] && r < mr[0]))
 			{
-				*mr = r;
+				mr[0] = r;
+				mr[1] = mediar[r - startReg];
 			}
 		}
     }
@@ -321,8 +319,8 @@ int main (int argc, char *argv[]){
     int *notas;
     int *menorc, *maiorc, *menorr, *maiorr, menorb, maiorb;
     double *medianac, *mediac, *dpc, *medianar, *mediar, *dpr, medianab, mediab, dpb;
-    int mr;       //num da melhor regiao
-    int mcr, mcc; //num da regiao da melhor cidade e da melhor cidade respectivamente
+    int mr[2] = {-1, -1}; // pos 0 = numero da melhor regiao; pos 1 = valor da media na melhor regiao
+    int mc[3] = {-1, -1, -1}; // pos 0 = numero da regiao da melhor cidade; pos 1 = numero da melhor cidade; pos 2 = valor da media na melhor cidade
 	MPI_Comm commWorld = MPI_COMM_WORLD;
 
 //--------------- Código executado no inicio de cada processo, avalia os argumentos de entrada e inicializa a matriz (Replicação de 
@@ -379,17 +377,18 @@ int main (int argc, char *argv[]){
 	if((w_size - w_rank) <= (R % w_size))
 		nRegioes++;
 	int nCidades = nRegioes * C;
-	int nAlunos = nCidades * A;
 
-	int startIndex = nRegioes * w_rank;
+	int primeiraRegiao = (R / w_size) * w_rank;
 	if((R % w_size) - (w_size - w_rank) > 0)
-		startIndex += ((R % w_size) - (w_size - w_rank));
+		primeiraRegiao += ((R % w_size) - (w_size - w_rank));
 
 //--------------- Alocação de memoria necessaria
 	int *distribuicaoCidades = NULL;
 	int *offsetCidades = NULL;
 	int *distribuicaoRegioes = NULL;
 	int *offsetRegioes = NULL;
+	int *melhorRegiao = NULL;
+	int *melhorCidade = NULL;
 	double *mediabProcessos = NULL;
 	double *dpbProcessos = NULL;
 	// Alocação de memoria, o processo 0 precisa ser capaz de armazenar todas as informações para realizar um gatherv
@@ -439,9 +438,11 @@ int main (int argc, char *argv[]){
 			}
 		}
 
-		// Ele tambem precisa de arrays auxiliares para armazenar as medias e dp brasileiras calculadas em cada processo
+		// Ele tambem precisa de arrays auxiliares para armazenar as medias e dp brasileiras calculadas em cada processo, assim como index de melhor regiao e cidade
 		mediabProcessos = (double*)malloc(sizeof(double) * w_size);
 		dpbProcessos = (double*)malloc(sizeof(double) * w_size);
+		melhorCidade = (int*)malloc(sizeof(int) * 3 * w_size);
+		melhorRegiao = (int*)malloc(sizeof(int) * 2 * w_size);
 	}else{
 		menorc = NULL;
 		maiorc = NULL;
@@ -489,32 +490,27 @@ int main (int argc, char *argv[]){
 		#pragma omp section
 		{
 			// calcula_menor
-			printf("calculando menor no processo %d\n", w_rank);
-			calcula_menor(notas, menorc_aqui, menorr_aqui, &menorb, startIndex, nRegioes, C, A);
+			calcula_menor(notas, menorc_aqui, menorr_aqui, &menorb, primeiraRegiao, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_maior
-			printf("calculando maior no processo %d\n", w_rank);
-			calcula_maior(notas, maiorc_aqui, maiorr_aqui, &maiorb, startIndex, nRegioes, C, A);
+			calcula_maior(notas, maiorc_aqui, maiorr_aqui, &maiorb, primeiraRegiao, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
-			// calcula_mediana (OBS.: alterado)
-			printf("calculando mediana no processo %d\n", w_rank);
-            calcula_mediana(notas, medianac_aqui, medianar_aqui, startIndex, nRegioes, C, A);
+			// calcula_mediana 
+            calcula_mediana(notas, medianac_aqui, medianar_aqui, primeiraRegiao, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_media
-			printf("calculando media no processo %d\n", w_rank);
-            calcula_media(notas, mediac_aqui, mediar_aqui, &mediab, &mr, &mcr, &mcc, startIndex, nRegioes, C, A);
+            calcula_media(notas, mediac_aqui, mediar_aqui, &mediab, mr, mc, primeiraRegiao, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
 			// calcula_dp
-			printf("calculando desvio padrao no processo %d\n", w_rank);
-			calcula_dp(notas, dpc_aqui, dpr_aqui, &dpb, startIndex, nRegioes, C, A);
+			calcula_dp(notas, dpc_aqui, dpr_aqui, &dpb, primeiraRegiao, nRegioes, C, A);
 		}
 		#pragma omp section
 		{
@@ -524,10 +520,11 @@ int main (int argc, char *argv[]){
 				memcpy(notas2, notas, sizeof(int) * NTA);
 				qsort(notas2, NTA, sizeof(int), cmpfunc);
 				if(NTA % 2){
-					medianab = notas[NTA / 2];
+					medianab = notas2[NTA / 2];
 				}else{
-					medianab = (notas[NTA / 2] + notas[NTA / 2 - 1]) / 2.0;
+					medianab = (notas2[NTA / 2] + notas2[NTA / 2 - 1]) / 2.0;
 				}
+				free(notas2);
 			}
 		}
 	}
@@ -556,6 +553,10 @@ int main (int argc, char *argv[]){
 	// Recebe as medias e desvios padrao calculados por cada processo
 	MPI_Gather(&mediab, 1, MPI_DOUBLE, mediabProcessos, 1, MPI_DOUBLE, 0, commWorld);
 	MPI_Gather(&dpb, 1, MPI_DOUBLE, dpbProcessos, 1, MPI_DOUBLE, 0, commWorld);
+
+	// Recebe os resultados de melhor regiao e cidade de cada processo
+	MPI_Gather(mr, 2, MPI_INT, melhorRegiao, 2, MPI_INT, 0, commWorld);
+	MPI_Gather(mc, 3, MPI_INT, melhorCidade, 3, MPI_INT, 0, commWorld);
 	
 //--------------- Liberação de memoria de todos os processos
 	// Libera a memória alocada
@@ -587,6 +588,26 @@ int main (int argc, char *argv[]){
 			dpb += distribuicaoRegioes[i] * ((dpbProcessos[i] * dpbProcessos[i]) + (desvioGlobal * desvioGlobal));
 		}
 		dpb /= R;
+		dpb = sqrt(dpb);
+
+		// Avalia qual a melhor regiao e qual a melhor cidade
+		mr[0] = -1;
+		mr[1] = -1;
+		mc[0] = -1;
+		mc[1] = -1;
+		mc[2] = -1;
+		for(int i = 0; i < w_size; i++){
+			if(melhorRegiao[i*2 + 1] > mr[1]){
+				mr[1] = melhorRegiao[i*2 + 1];
+				mr[0] = melhorRegiao[i*2];
+			}
+
+			if(melhorCidade[i*3 + 2] > mc[2]){
+				mc[2] = melhorCidade[i*3 + 2];
+				mc[1] = melhorCidade[i*3 + 1];
+				mc[0] = melhorCidade[i*3];
+			}
+		}
 
 		// Calcula quanto tempo demorou
 		wtime = omp_get_wtime() - wtime;
@@ -612,8 +633,8 @@ int main (int argc, char *argv[]){
 		printf("Brasil: menor: %d, maior: %d, mediana: %.2f, média: %.2f e DP: %.2f\n\n", menorb, maiorb, medianab, mediab, dpb);
 
 		//printando melhores
-		printf("Melhor região: Região %d\n", mr);
-		printf("Melhor cidade: Região %d, Cidade %d\n", mcr, mcc);
+		printf("Melhor região: Região %d\n", mr[0]);
+		printf("Melhor cidade: Região %d, Cidade %d\n", mc[0], mc[1]);
 		printf("\n");
 
 		printf("Tempo de resposta sem considerar E/S, em segundos: %.3lfs\n", wtime);
@@ -631,6 +652,8 @@ int main (int argc, char *argv[]){
 		free(dpr);
 		free(mediabProcessos);
 		free(dpbProcessos);
+		free(melhorCidade);
+		free(melhorRegiao);
 		// Libera a memoria das arrays de contagem de elementos
 		free(distribuicaoCidades);
 		free(distribuicaoRegioes);
