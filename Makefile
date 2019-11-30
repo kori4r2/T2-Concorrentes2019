@@ -63,5 +63,5 @@ clean :
 	clear
 
 .zip : clean
-	zip $(PROJECT).zip $(SRCS) $(LIBS) $(SEQSRCS) $(REMOTEFILES) *.pdf
+	zip -j $(PROJECT).zip $(SRCS) $(LIBS) $(SEQSRCS) $(REMOTEFILES) *.pdf
 
