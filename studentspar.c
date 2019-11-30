@@ -138,24 +138,35 @@ int main (int argc, char *argv[]){
 	{
 		#pragma omp section
 		{
-			#pragma omp parallel for schedule(guided)
-			for(int reg = 0; reg < nRegioes; reg++){
-				// Calcula todas as coisas para a regiao reg
-				// Primeira posição é a posição (startIndex+reg)*C*A de notas
-				printf("Olá da região %d\n", startIndex+reg);
-//--------------- Gather de informações calculadas pelas regiões e calculo de valores do conjunto de regiões
-			// Calcular as coisas aqui
-			}
+			// calcula_menor
+		}
+		#pragma omp section
+		{
+			// calcula_maior
+		}
+		#pragma omp section
+		{
+			// calcula_mediana (OBS.: alterado)
+		}
+		#pragma omp section
+		{
+			// calcula_media
+		}
+		#pragma omp section
+		{
+			// calcula_dp
 		}
 		#pragma omp section
 		{
 //--------------- Ordenação de todas as notas para calculo de mediana do brasil (processo 0)
 			if(w_rank == 0){
-				qsort(notas, R * C * A, sizeof(int), cmpfunc);
-				if((R * C * A) % 2){
-					medianab = notas[R * C * A / 2];
+				int *notas2 (int*)malloc(sizeof(int) * NTA);
+				memcpy(notas2, notas, sizeof(int) * NTA);
+				qsort(notas2, NTA, sizeof(int), cmpfunc);
+				if(NTA % 2){
+					medianab = notas[NTA / 2];
 				}else{
-					medianab = (notas[R * C * A / 2] + notas[R * C * A / 2 - 1]) / 2.0;
+					medianab = (notas[NTA / 2] + notas[NTA / 2 - 1]) / 2.0;
 				}
 			}
 		}
